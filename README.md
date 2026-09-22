@@ -89,10 +89,11 @@ You can also leave the default install where it is and set
 ## Usage
 
 Run `claudemulti` with no arguments to get the interactive menu. It lists the
-sessions for the current directory. Pick one by number, then pick an action:
+sessions for the current directory, newest first. Pick one by number, or press
+Enter for the most recent, then pick an action:
 
 ```
-Select session [1-3], n = new session, g = all directories, q = quit: 2
+Select session [1-3, Enter = 1], n = new session, g = all directories, q = quit: 2
 
   1) Resume
   2) Transfer to another account and resume there

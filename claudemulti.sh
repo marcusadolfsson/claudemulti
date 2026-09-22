@@ -1947,11 +1947,16 @@ interactive_menu() {
         local prompt="n = new session, $scope_hint, q = quit: "
 
         if (( count > 0 )); then
-            prompt="Select session [1-$count], $prompt"
+            # The list is newest first, so 1 is the most recent.
+            prompt="Select session [1-$count, Enter = 1], $prompt"
         fi
 
         while true; do
             read -rp "$prompt" choice
+
+            if [[ -z "$choice" ]] && (( count > 0 )); then
+                choice=1
+            fi
 
             case "$choice" in
                 n|N)
