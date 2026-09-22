@@ -261,12 +261,49 @@ under the session's ID, which no other session in the destination can be using:
 
 Some files are shared with other sessions, so they are treated differently:
 
-- **Project memory** (`projects/<project>/memory/`): files missing from the
-  destination are added. Existing ones are never overwritten; any that differ
-  are listed so you can merge them by hand.
+- **Project memory** (`projects/<project>/memory/`): merged, not replaced.
+  See below.
 - **`history.jsonl`** (prompt history): not copied.
 - **`.credentials.json`, `.claude.json`, `sessions/`**: never copied. These
   belong to the account, not the session.
+
+### Project memory
+
+Claude's auto-memory for a project lives in the account, not in the project,
+so each account has its own copy. It is also shared by every session of that
+project in the account, so a transfer merges it rather than replacing it. For
+each memory file in the source:
+
+| Situation | What happens |
+|---|---|
+| missing in the destination | copied |
+| identical | nothing |
+| `MEMORY.md`, the index | the newer copy, plus any index lines only the older copy has; lines whose file no longer exists are dropped |
+| changed on one side only, or on both sides in different places | three-way merge, keeping the changes from both |
+| both sides changed the same lines, or it has never been synced before | you choose |
+
+Files only the destination has are never touched. Any destination file that
+changes is backed up first, with the rest of the transfer's backups.
+
+When you choose, the prompt is:
+
+```
+  memory/brain-dev-discipline.md differs, and both sides changed it (marcus1 is newer).
+  [Enter] keep newer, s = marcus1, d = marcus2, v = view diff, c = merge with Claude:
+```
+
+`c` sends both versions to `claude -p` under the destination account. It runs
+with no tools, no MCP servers and no saved session, from a throwaway directory.
+Claude writes one note that keeps every fact from both, and prefers the newer
+version where they contradict each other. You see the result as a diff and
+accept or reject it. It costs one small request.
+
+The three-way merge needs the version the two sides last had in common. Each
+transfer records it in `~/.claude-accounts/.claudemulti/memory-base/<project>/`,
+outside every account, so Claude never loads it. ClaudeMulti ignores
+dot-directories when it looks for accounts. The first transfer of a project
+after this has nothing to compare against, so files that differ go to the
+prompt.
 
 ### Safety
 

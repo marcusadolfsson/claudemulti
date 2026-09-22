@@ -61,6 +61,11 @@ ALL_DIRS=0
 
 CURRENT_DIR="$(realpath -m "$PWD")"
 
+# The last version of each project memory file that a transfer
+# synced, used as the common ancestor for three-way merges. Kept
+# outside every account so Claude never loads it as a memory.
+MEMORY_BASE_DIR="$PROFILES_BASE/.claudemulti/memory-base"
+
 # Extra arguments passed through to claude (everything after --).
 declare -a CLAUDE_ARGS=()
 
@@ -420,10 +425,13 @@ discover_profiles() {
             PROFILE_DIRS+=("$(realpath -m "$dir")")
             PROFILE_NAMES+=("$(basename "$dir")")
         done < <(
+            # Dot-directories are ClaudeMulti's own (.claudemulti),
+            # not accounts.
             find "$PROFILES_BASE" \
                 -mindepth 1 \
                 -maxdepth 1 \
                 -type d \
+                ! -name '.*' \
                 -print0 \
                 2>/dev/null \
                 | sort -z
@@ -1482,6 +1490,342 @@ archive_transcript() {
     printf '%s' "$archived"
 }
 
+# ============================================================
+# Project memory sync
+#
+# projects/<project>/memory/ is shared by every session of the
+# project in that account, so a transfer never simply replaces
+# it. For each file in the source:
+#
+#   missing in the destination   copied
+#   identical                    nothing to do
+#   MEMORY.md (the index)        the newer copy, plus any index
+#                                lines only the older copy has
+#   anything else that differs   three-way merge against the
+#                                version the last transfer synced;
+#                                if both sides changed the same
+#                                lines, you choose (or ask Claude)
+#
+# Files only the destination has are never touched. Before a
+# destination file is changed it is backed up with the rest of
+# the transfer's backups.
+# ============================================================
+
+# merge_memory_index NEWER OLDER MEMORY_DIR OUT
+#
+# The index is one line per memory, each linking to its file.
+# Keep the newer index, drop lines whose file does not exist,
+# and add the older index's lines for files the newer one does
+# not mention, so no memory drops out of view.
+merge_memory_index() {
+    python3 - "$@" <<'PY'
+import os
+import re
+import sys
+
+newer, older, memory_dir, out = sys.argv[1:5]
+LINK = re.compile(r"\]\(([^)#\s]+\.md)\)")
+
+
+def read_lines(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.read().splitlines()
+
+
+def target(line):
+    match = LINK.search(line)
+    return match.group(1) if match else None
+
+
+def exists(name):
+    return os.path.isfile(os.path.join(memory_dir, name))
+
+
+result = []
+listed = set()
+
+for line in read_lines(newer):
+    name = target(line)
+
+    if name and not exists(name):
+        continue
+
+    if name:
+        listed.add(name)
+
+    result.append(line)
+
+for line in read_lines(older):
+    name = target(line)
+
+    if name and name not in listed and exists(name):
+        result.append(line)
+        listed.add(name)
+
+with open(out, "w", encoding="utf-8") as f:
+    f.write("\n".join(result) + "\n")
+PY
+}
+
+# claude_merge_memory PROFILE_DIR NEWER_LABEL A_LABEL A B_LABEL B OUT
+#
+# Ask Claude for one note combining both versions. Runs from a
+# scratch directory with no tools, no MCP servers and no saved
+# session, so it cannot touch anything and leaves no transcript.
+claude_merge_memory() {
+    local profile_dir="$1"
+    local newer_label="$2"
+    local a_label="$3"
+    local a="$4"
+    local b_label="$5"
+    local b="$6"
+    local out="$7"
+
+    local scratch
+    scratch="$(mktemp -d)"
+
+    local rc=0
+
+    {
+        cat <<EOF
+Below are two versions of the same Claude Code memory note. Merge them into
+one note that keeps every distinct fact, rule and example from both. Remove
+repetition. Where they contradict each other, prefer the version from
+"$newer_label", which is newer. Keep the note's format exactly, including any
+frontmatter between --- lines. Output only the merged file content: no
+commentary and no code fences.
+
+===== VERSION FROM "$a_label" =====
+EOF
+        cat -- "$a"
+        printf '\n===== VERSION FROM "%s" =====\n' "$b_label"
+        cat -- "$b"
+    } | (
+        cd "$scratch" &&
+        CLAUDE_CONFIG_DIR="$profile_dir" claude -p \
+            --no-session-persistence \
+            --tools "" \
+            --strict-mcp-config
+    ) > "$out" || rc=$?
+
+    rm -rf -- "$scratch"
+
+    # Some replies wrap the file in a code fence anyway.
+    if (( rc == 0 )) && [[ -s "$out" ]]; then
+        python3 - "$out" <<'PY'
+import sys
+
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read().strip("\n")
+lines = text.splitlines()
+
+if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].strip() == "```":
+    lines = lines[1:-1]
+
+open(path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+PY
+        return 0
+    fi
+
+    rm -f -- "$out"
+    return 1
+}
+
+# resolve_memory_conflict REL SRC DST OUT SRC_LABEL DST_LABEL DST_PROFILE_DIR
+#
+# Both sides changed the same lines. Sets MEMORY_CHOICE to src,
+# dst or merged; for "merged" the result is in OUT.
+MEMORY_CHOICE=""
+
+resolve_memory_conflict() {
+    local rel="$1"
+    local src="$2"
+    local dst="$3"
+    local out="$4"
+    local src_label="$5"
+    local dst_label="$6"
+    local dst_profile_dir="$7"
+
+    local newer="src"
+    local newer_label="$src_label"
+
+    if [[ "$dst" -nt "$src" ]]; then
+        newer="dst"
+        newer_label="$dst_label"
+    fi
+
+    echo
+    echo "  memory/$rel differs, and both sides changed it ($newer_label is newer)."
+
+    local answer
+
+    while true; do
+        read -rp "  [Enter] keep newer, s = $src_label, d = $dst_label, v = view diff, c = merge with Claude: " answer
+
+        case "$answer" in
+            "")
+                MEMORY_CHOICE="$newer"
+                return 0
+                ;;
+            s|S)
+                MEMORY_CHOICE="src"
+                return 0
+                ;;
+            d|D)
+                MEMORY_CHOICE="dst"
+                return 0
+                ;;
+            v|V)
+                echo
+                diff -u --label "$dst_label" --label "$src_label" -- "$dst" "$src" || true
+                echo
+                ;;
+            c|C)
+                echo "  Asking Claude to merge..."
+
+                if ! claude_merge_memory "$dst_profile_dir" "$newer_label" \
+                        "$dst_label" "$dst" "$src_label" "$src" "$out"; then
+                    echo "  The merge failed; choose another option."
+                    continue
+                fi
+
+                echo
+                diff -u --label "$dst_label (now)" --label "merged" -- "$dst" "$out" || true
+                echo
+
+                if confirm "  Use this merge?" y; then
+                    MEMORY_CHOICE="merged"
+                    return 0
+                fi
+
+                rm -f -- "$out"
+                ;;
+            *)
+                echo "  Invalid selection."
+                ;;
+        esac
+    done
+}
+
+# sync_memory SRC_MEMORY DST_MEMORY SRC_LABEL DST_LABEL DST_PROFILE_DIR BACKUP_DIR PROJECT_KEY
+sync_memory() {
+    local src_memory="$1"
+    local dst_memory="$2"
+    local src_label="$3"
+    local dst_label="$4"
+    local dst_profile_dir="$5"
+    local backup_dir="$6"
+    local project_key="$7"
+
+    [[ -d "$src_memory" ]] || return 0
+
+    local base_dir="$MEMORY_BASE_DIR/$project_key"
+
+    # The index goes last, so it is merged against the final set
+    # of memory files.
+    local -a rels=()
+    mapfile -t rels < <(
+        find "$src_memory" -type f -printf '%P\n' 2>/dev/null \
+            | sort \
+            | awk '$0 == "MEMORY.md" { index_file = 1; next } { print } END { if (index_file) print "MEMORY.md" }'
+    )
+
+    local -a report=()
+    local backed_up=0
+    local rel
+
+    for rel in "${rels[@]}"; do
+        [[ -n "$rel" ]] || continue
+
+        local src="$src_memory/$rel"
+        local dst="$dst_memory/$rel"
+        local base="$base_dir/$rel"
+        local result="$dst.claudemulti-merge.$$"
+        local line=""
+
+        rm -f -- "$result"
+
+        if ! path_exists "$dst"; then
+            mkdir -p "$(dirname "$dst")"
+            cp -a -- "$src" "$dst"
+            line="added    memory/$rel"
+
+        elif cmp -s "$src" "$dst"; then
+            line=""
+
+        elif [[ "$rel" == "MEMORY.md" ]]; then
+            if [[ "$dst" -nt "$src" ]]; then
+                merge_memory_index "$dst" "$src" "$dst_memory" "$result"
+            else
+                merge_memory_index "$src" "$dst" "$dst_memory" "$result"
+            fi
+            line="merged   memory/$rel  (index lines from both)"
+
+        elif [[ -f "$base" ]] && git merge-file -p -- "$dst" "$base" "$src" > "$result" 2>/dev/null; then
+            line="merged   memory/$rel  (changes from both)"
+
+        else
+            rm -f -- "$result"
+
+            resolve_memory_conflict "$rel" "$src" "$dst" "$result" \
+                "$src_label" "$dst_label" "$dst_profile_dir"
+
+            case "$MEMORY_CHOICE" in
+                src)
+                    cp -- "$src" "$result"
+                    line="updated  memory/$rel  (took $src_label's)"
+                    ;;
+                dst)
+                    line="kept     memory/$rel  ($dst_label's)"
+                    ;;
+                merged)
+                    line="merged   memory/$rel  (by Claude)"
+                    ;;
+            esac
+        fi
+
+        # Swap a changed result in, backing up what it replaces.
+        if [[ -f "$result" ]]; then
+            if cmp -s "$result" "$dst"; then
+                rm -f -- "$result"
+            else
+                local backup="$backup_dir/$(relative_to "$dst" "$dst_profile_dir")"
+
+                mkdir -p "$(dirname "$backup")"
+                cp -a -- "$dst" "$backup"
+                backed_up=1
+
+                mv -f -- "$result" "$dst"
+            fi
+        fi
+
+        # The source's version is what both sides now share: the
+        # destination holds it or has merged it in. It is the
+        # right ancestor for the next merge in either direction.
+        mkdir -p "$(dirname "$base")"
+        cp -- "$src" "$base"
+
+        if [[ -n "$line" ]]; then
+            report+=("$line")
+        fi
+    done
+
+    if [[ ${#report[@]} -gt 0 ]]; then
+        echo
+        echo "Project memory:"
+
+        for line in "${report[@]}"; do
+            echo "  $line"
+        done
+
+        if (( backed_up )); then
+            echo
+            echo "  Previous destination copies backed up to:"
+            echo "    $(pretty_path "$backup_dir")"
+        fi
+    fi
+}
+
 declare -a XFER_SRC=()
 declare -a XFER_DST=()
 
@@ -1812,43 +2156,17 @@ do_transfer() {
     done
 
     # --------------------------------------------------------
-    # Project memory: add what is missing, never overwrite.
+    # Project memory: add what is missing, merge what differs.
     # --------------------------------------------------------
 
-    local src_memory="$src_project_dir/memory"
-    local dst_memory="$dst_project_dir/memory"
-
-    if [[ -d "$src_memory" ]]; then
-        local -a added=()
-        local -a differing=()
-        local mem
-
-        while IFS= read -r -d '' mem; do
-            local rel="${mem#"$src_memory"/}"
-            local target="$dst_memory/$rel"
-
-            if ! path_exists "$target"; then
-                mkdir -p "$(dirname "$target")"
-                cp -a -- "$mem" "$target"
-                added+=("$rel")
-            elif ! cmp -s "$mem" "$target"; then
-                differing+=("$rel")
-            fi
-        done < <(find "$src_memory" -type f -print0 2>/dev/null || true)
-
-        if [[ ${#added[@]} -gt 0 || ${#differing[@]} -gt 0 ]]; then
-            echo
-            echo "Project memory:"
-
-            for mem in "${added[@]}"; do
-                echo "  added    memory/$mem"
-            done
-
-            for mem in "${differing[@]}"; do
-                echo "  kept     memory/$mem  (differs in '$src_profile'; not overwritten)"
-            done
-        fi
-    fi
+    sync_memory \
+        "$src_project_dir/memory" \
+        "$dst_project_dir/memory" \
+        "$src_profile" \
+        "$dst_profile" \
+        "$dst_profile_dir" \
+        "$dst_profile_dir/session-transfer-backups/$sid/$timestamp" \
+        "$(basename "$src_project_dir")"
 
     local changed=0
 
