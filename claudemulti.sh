@@ -119,11 +119,20 @@ terminal_width() {
     fi
 }
 
+# confirm PROMPT [DEFAULT]
+#
+# DEFAULT is "n" (the default) or "y": what Enter means.
 confirm() {
     local prompt="$1"
+    local default="${2:-n}"
     local answer
 
-    read -rp "$prompt [y/N]: " answer
+    if [[ "$default" == "y" ]]; then
+        read -rp "$prompt [Y/n]: " answer
+        answer="${answer:-y}"
+    else
+        read -rp "$prompt [y/N]: " answer
+    fi
 
     case "$answer" in
         y|Y|yes|YES) return 0 ;;
@@ -1177,9 +1186,19 @@ choose_profile() {
     echo
 
     local choice
+    local prompt="Select account [1-${#map[@]}]: "
+
+    # With only one account on offer, Enter picks it.
+    if [[ ${#map[@]} -eq 1 ]]; then
+        prompt="Select account [1, Enter = 1]: "
+    fi
 
     while true; do
-        read -rp "Select account [1-${#map[@]}]: " choice
+        read -rp "$prompt" choice
+
+        if [[ -z "$choice" && ${#map[@]} -eq 1 ]]; then
+            choice=1
+        fi
 
         if [[ "$choice" =~ ^[0-9]+$ ]] &&
            (( choice >= 1 && choice <= ${#map[@]} )); then
@@ -1209,7 +1228,9 @@ choose_session() {
     local choice
 
     while true; do
-        read -rp "Select session [1-${#SESSION_FILES[@]}]: " choice
+        # Newest first, so Enter picks the most recent.
+        read -rp "Select session [1-${#SESSION_FILES[@]}, Enter = 1]: " choice
+        choice="${choice:-1}"
 
         if [[ "$choice" =~ ^[0-9]+$ ]] &&
            (( choice >= 1 && choice <= ${#SESSION_FILES[@]} )); then
@@ -1792,7 +1813,7 @@ do_transfer() {
     # results, for instance) keep resolving.
     # --------------------------------------------------------
 
-    if confirm "Archive the source copy so only '$dst_profile' lists this session?"; then
+    if confirm "Archive the source copy so only '$dst_profile' lists this session?" y; then
         local archive_dir="$src_profile_dir/session-transfer-backups/$sid/$timestamp-archived"
         local archived="$archive_dir/$(relative_to "$src_file" "$src_profile_dir")"
 

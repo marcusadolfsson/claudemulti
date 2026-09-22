@@ -204,7 +204,8 @@ Some files are shared with other sessions, so they are treated differently:
   copied last.
 - Transcripts are never merged. One copy replaces the other.
 
-After the transfer you are offered the option to **archive the source copy**,
+After the transfer you are asked whether to **archive the source copy**
+(the default, so pressing Enter archives it),
 so that only the destination lists the session and you can't resume the old
 copy by mistake. Only the source transcript is moved, to
 `<source>/session-transfer-backups/<id>/<timestamp>-archived/`. The session's
