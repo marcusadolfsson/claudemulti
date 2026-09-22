@@ -434,7 +434,7 @@ discover_profiles() {
         done < <(
             # Dot-directories are ClaudeMulti's own (.claudemulti),
             # not accounts.
-            find "$PROFILES_BASE" \
+            find -H "$PROFILES_BASE" \
                 -mindepth 1 \
                 -maxdepth 1 \
                 -type d \
@@ -526,7 +526,7 @@ session_candidates() {
 
         [[ -d "$projects" ]] || continue
 
-        find "$projects" \
+        find -H "$projects" \
             -mindepth 2 \
             -maxdepth 2 \
             -type f \
@@ -1424,7 +1424,7 @@ find_destination_sessions() {
 
     [[ -d "$profile_dir/projects" ]] || return 0
 
-    find "$profile_dir/projects" \
+    find -H "$profile_dir/projects" \
         -mindepth 2 \
         -maxdepth 2 \
         -type f \
@@ -1736,7 +1736,7 @@ sync_memory() {
     # of memory files.
     local -a rels=()
     mapfile -t rels < <(
-        find "$src_memory" -type f -printf '%P\n' 2>/dev/null \
+        find -H "$src_memory" -type f -printf '%P\n' 2>/dev/null \
             | sort \
             | awk '$0 == "MEMORY.md" { index_file = 1; next } { print } END { if (index_file) print "MEMORY.md" }'
     )
@@ -2048,7 +2048,7 @@ do_transfer() {
         add_transfer_item "$src_profile_dir/todos/$name" "$dst_profile_dir/todos/$name"
     done < <(
         {
-            find "$src_profile_dir/todos" "$dst_profile_dir/todos" \
+            find -H "$src_profile_dir/todos" "$dst_profile_dir/todos" \
                 -maxdepth 1 \
                 -type f \
                 -name "$sid-*.json" \
@@ -2252,7 +2252,7 @@ show_accounts() {
 
         if [[ -d "$dir/projects" ]]; then
             count="$(
-                find "$dir/projects" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' 2>/dev/null \
+                find -H "$dir/projects" -mindepth 2 -maxdepth 2 -type f -name '*.jsonl' 2>/dev/null \
                     | grep -cE '/[0-9a-fA-F-]{20,}\.jsonl$' || true
             )"
         fi
