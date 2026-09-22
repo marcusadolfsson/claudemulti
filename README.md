@@ -99,14 +99,23 @@ Select session [1-3, Enter = 1], n = new session, g = all directories, q = quit:
 
   1) Resume
   2) Transfer to another account and resume there
-  3) Back
+  3) Archive
+  4) Back
 
-Select action [1-3, Enter = resume]:
+Select action [1-4, Enter = resume]:
 ```
 
 At the first prompt, `n` starts a new session in the current directory and `g`
 switches between this directory and every directory. `claudemulti -g` starts
 with every directory.
+
+**Archive** clears old sessions out of the list. It asks first, refuses while
+the session is running, and then returns you to the session list. Only the
+transcript moves, to
+`<account>/session-transfer-backups/<id>/<timestamp>-archived/`, under the same
+path it had in the account; the session's other files stay put. Claude's own
+`/resume` stops listing it too. To restore it, move the file back; the path is
+printed when you archive.
 
 What Enter does at each prompt:
 
@@ -115,7 +124,7 @@ What Enter does at each prompt:
 | Select session | the most recent session |
 | Select action | Resume |
 | Select account | the account, when only one is on offer |
-| Archive the source copy? | **yes** |
+| Archive this session? / Archive the source copy? | **yes** |
 | Claude is already running, continue anyway? | **no** |
 | Replace the newer destination copy? | **no** |
 

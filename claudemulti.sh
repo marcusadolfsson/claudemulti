@@ -1452,6 +1452,36 @@ find_destination_sessions() {
 # account, not the session.
 # ============================================================
 
+# ------------------------------------------------------------
+# archive_transcript PROFILE_DIR FILE STAMP
+#
+# Move a session's transcript out of Claude's view, to
+#
+#   <account>/session-transfer-backups/<id>/<STAMP>-archived/<path>
+#
+# where <path> is the transcript's path inside the account, so
+# restoring it is moving it back. Only the transcript moves: the
+# session directory, file history and so on stay, so absolute
+# paths in the transcript keep resolving and a restored session
+# is complete. Prints the new location.
+# ------------------------------------------------------------
+
+archive_transcript() {
+    local profile_dir="$1"
+    local file="$2"
+    local stamp="$3"
+
+    local sid
+    sid="$(basename "$file" .jsonl)"
+
+    local archived="$profile_dir/session-transfer-backups/$sid/$stamp-archived/$(relative_to "$file" "$profile_dir")"
+
+    mkdir -p "$(dirname "$archived")"
+    mv -- "$file" "$archived"
+
+    printf '%s' "$archived"
+}
+
 declare -a XFER_SRC=()
 declare -a XFER_DST=()
 
@@ -1851,11 +1881,8 @@ do_transfer() {
     # --------------------------------------------------------
 
     if confirm "Archive the source copy so only '$dst_profile' lists this session?" y; then
-        local archive_dir="$src_profile_dir/session-transfer-backups/$sid/$timestamp-archived"
-        local archived="$archive_dir/$(relative_to "$src_file" "$src_profile_dir")"
-
-        mkdir -p "$(dirname "$archived")"
-        mv -- "$src_file" "$archived"
+        local archived
+        archived="$(archive_transcript "$src_profile_dir" "$src_file" "$timestamp")"
 
         echo
         echo "Source transcript archived:"
@@ -1922,11 +1949,49 @@ show_accounts() {
 # ============================================================
 
 # ------------------------------------------------------------
+# do_archive SESSION_INDEX
+#
+# Hide an old session from Claude and from this list. Refuses
+# while the session is running: Claude would recreate the
+# transcript on its next write, leaving a partial copy behind.
+# ------------------------------------------------------------
+
+do_archive() {
+    local i="$1"
+
+    local profile_index="${SESSION_PROFILE_INDEXES[$i]}"
+    local profile_dir="${PROFILE_DIRS[$profile_index]}"
+    local file="${SESSION_FILES[$i]}"
+    local sid="${SESSION_IDS[$i]}"
+
+    discover_running
+
+    if [[ -n "${RUNNING_BY_SID[$sid]:-}" ]]; then
+        echo
+        echo "This session is running (pid ${RUNNING_BY_SID[$sid]}). Exit it first."
+        return 1
+    fi
+
+    echo
+    confirm "Archive this session?" y || return 1
+
+    local archived
+    archived="$(archive_transcript "$profile_dir" "$file" "$(date '+%Y%m%d-%H%M%S')")"
+
+    echo
+    echo "Archived to:"
+    echo "  $(pretty_path "$archived")"
+    echo
+    echo "To restore it, move that file back to:"
+    echo "  $(pretty_path "$file")"
+}
+
+# ------------------------------------------------------------
 # Second step of the menu: what to do with the chosen session.
 # Resume is first and is what Enter does.
 #
-# Returns 1 for "back" or a cancelled action; a successful
-# action execs claude and never returns.
+# Returns 1 for "back", an archive, or a cancelled action; resume
+# and transfer exec claude and never return.
 # ------------------------------------------------------------
 
 session_actions() {
@@ -1947,13 +2012,14 @@ session_actions() {
     echo
     echo "  1) Resume"
     echo "  2) Transfer to another account and resume there"
-    echo "  3) Back"
+    echo "  3) Archive"
+    echo "  4) Back"
     echo
 
     local action
 
     while true; do
-        read -rp "Select action [1-3, Enter = resume]: " action
+        read -rp "Select action [1-4, Enter = resume]: " action
 
         case "$action" in
             ""|1|r|R)
@@ -1965,7 +2031,12 @@ session_actions() {
                 do_transfer "$i" "$CHOSEN_PROFILE_INDEX"
                 return
                 ;;
-            3|b|B)
+            3|a|A)
+                # Back to the (reloaded) session list either way.
+                do_archive "$i" || true
+                return 1
+                ;;
+            4|b|B)
                 return 1
                 ;;
             *)
