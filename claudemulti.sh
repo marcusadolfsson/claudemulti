@@ -44,6 +44,10 @@ INCLUDE_DEFAULT="${CLAUDEMULTI_INCLUDE_DEFAULT:-0}"
 # Show sessions with nothing in them (set by --all).
 SHOW_EMPTY=0
 
+# List sessions from every directory, not just the current one
+# (set by -g).
+ALL_DIRS=0
+
 CURRENT_DIR="$(realpath -m "$PWD")"
 
 # Extra arguments passed through to claude (everything after --).
@@ -491,6 +495,26 @@ session_candidates() {
     done | grep -E $'\t[^\t]*/[0-9a-fA-F-]{20,}\\.jsonl$' || true
 }
 
+# Only the candidates for the current directory. Claude files a
+# project's transcripts under projects/<encoded cwd>/, so this
+# matches exactly the sessions Claude's own /resume would show.
+current_dir_candidates() {
+    local encoded
+    encoded="$(encode_project_dir "$CURRENT_DIR")"
+
+    session_candidates \
+        | awk -F'\t' -v dir="/projects/$encoded/" 'index($3, dir) > 0' \
+        || true
+}
+
+list_candidates() {
+    if [[ "$ALL_DIRS" == "1" ]]; then
+        session_candidates
+    else
+        current_dir_candidates
+    fi
+}
+
 # ------------------------------------------------------------
 # load_sessions WANT
 #
@@ -548,13 +572,13 @@ discover_sessions() {
     # a slot in the list.
     if [[ "$SHOW_EMPTY" == "1" ]]; then
         load_sessions 0 < <(
-            session_candidates \
+            list_candidates \
                 | sort -t $'\t' -k1,1nr \
                 | head -n "$SESSION_LIMIT"
         )
     else
         load_sessions "$SESSION_LIMIT" < <(
-            session_candidates \
+            list_candidates \
                 | sort -t $'\t' -k1,1nr
         )
     fi
@@ -1037,14 +1061,23 @@ show_sessions() {
     width="$(terminal_width)"
 
     echo
-    echo "Recent Claude sessions"
-    echo "════════════════════════════════════════════════════════════════"
-    echo
-    echo "  * = session project matches current directory"
+    if [[ "$ALL_DIRS" == "1" ]]; then
+        echo "Recent Claude sessions, all directories"
+        echo "════════════════════════════════════════════════════════════════"
+        echo
+        echo "  * = session project matches current directory"
+    else
+        echo "Claude sessions in $(pretty_path "$CURRENT_DIR")"
+        echo "════════════════════════════════════════════════════════════════"
+    fi
     echo
 
     if [[ ${#SESSION_FILES[@]} -eq 0 ]]; then
-        echo "  No sessions found."
+        if [[ "$ALL_DIRS" == "1" ]]; then
+            echo "  No sessions found."
+        else
+            echo "  No sessions in this directory. (-g lists every directory.)"
+        fi
         echo
         return 0
     fi
@@ -1063,7 +1096,8 @@ show_sessions() {
 
         local marker=" "
 
-        if [[ -n "$cwd" && "$(realpath -m "$cwd")" == "$CURRENT_DIR" ]]; then
+        # Only meaningful when other directories are listed too.
+        if [[ "$ALL_DIRS" == "1" && -n "$cwd" && "$(realpath -m "$cwd")" == "$CURRENT_DIR" ]]; then
             marker="*"
         fi
 
@@ -1162,7 +1196,11 @@ CHOSEN_SESSION_INDEX=""
 
 choose_session() {
     if [[ ${#SESSION_FILES[@]} -eq 0 ]]; then
-        echo "No Claude sessions found."
+        if [[ "$ALL_DIRS" == "1" ]]; then
+            echo "No Claude sessions found."
+        else
+            echo "No Claude sessions in this directory. Run with -g to see every directory."
+        fi
         return 1
     fi
 
@@ -1288,18 +1326,11 @@ resume_session() {
 # (or only in ONLY_PROFILE_INDEX when given).
 do_continue() {
     local only="${1:-}"
-    local encoded
-    encoded="$(encode_project_dir "$CURRENT_DIR")"
-
     local first=${#SESSION_FILES[@]}
 
     load_sessions 1 < <(
-        session_candidates \
-            | awk -F'\t' -v dir="/projects/$encoded/" -v only="$only" '
-                index($3, dir) == 0          { next }
-                only != "" && $2 != only     { next }
-                { print }
-              ' \
+        current_dir_candidates \
+            | awk -F'\t' -v only="$only" 'only == "" || $2 == only' \
             | sort -t $'\t' -k1,1nr
     )
 
@@ -1905,15 +1936,18 @@ With no options, shows the interactive menu.
                          directory, whichever account it is in.
   -t, --transfer SESSION Copy SESSION to the account given with -a
                          (asked for if omitted) and resume it there.
-  -l, --list             List recent sessions and exit.
+  -l, --list             List this directory's sessions and exit.
+  -g, --global           List sessions from every directory, not just the
+                         current one (list, menu and -r picker).
       --all              Include empty sessions (opened and closed without
                          a prompt) in the list and the menu.
   -p, --ps               List running Claude instances and exit.
       --accounts         List accounts and exit.
   -h, --help             Show this help.
 
-SESSION is a number from --list, or a session ID or ID prefix
-(at least 4 characters).
+SESSION is a number from --list (with -g if you listed with -g),
+or a session ID or ID prefix (at least 4 characters) from any
+directory.
 
 Arguments after -- are passed to claude, e.g.
 
@@ -1989,6 +2023,10 @@ while (( $# )); do
             ;;
         --all)
             SHOW_EMPTY=1
+            shift
+            ;;
+        -g|--global)
+            ALL_DIRS=1
             shift
             ;;
         -h|--help)

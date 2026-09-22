@@ -4,22 +4,21 @@ A launcher and session manager for running [Claude Code](https://claude.com/clau
 under several accounts on one machine.
 
 Each account is a separate Claude config directory, selected with
-`CLAUDE_CONFIG_DIR`. ClaudeMulti lists the sessions from every account together,
+`CLAUDE_CONFIG_DIR`. ClaudeMulti lists the sessions for the current directory from
+every account together,
 resumes any of them under the account that owns it, and moves a session from one
 account to another. A typical reason to move one is that an account has hit its
 usage limit partway through a conversation.
 
 ```
-Recent Claude sessions
+Claude sessions in ~/brain
 ════════════════════════════════════════════════════════════════
 
-  * = session project matches current directory
-
-  1)* marcus2      Sep 21 22:21  dc5e3966... ~/claudemulti  [running, pid 4077276]
-      Claude session management tool — fix 1-3 and the transfer gaps...
-
-  2)  marcus1      Sep 21 22:20  ffb6f200... ~/brain
+  1)  marcus1      Sep 21 22:34  ffb6f200... ~/brain  [running, pid 4087528]
       Brain-Dev-Server — why are there 21 emails in my inbox...
+
+  2)  marcus1      Sep 05 20:26  3bf3d3f3... ~/brain
+      FOAWA tag and guest registration todos — Add a tag called FOAWA...
 ```
 
 ## Requirements
@@ -89,8 +88,9 @@ You can also leave the default install where it is and set
 
 ## Usage
 
-Run `claudemulti` with no arguments to get the interactive menu: the recent
-sessions, then *Start fresh*, *Resume*, *Transfer* or *Quit*.
+Run `claudemulti` with no arguments to get the interactive menu: the sessions
+for the current directory, then *Start fresh*, *Resume*, *Transfer* or *Quit*.
+Run `claudemulti -g` for the same menu with sessions from every directory.
 
 The same actions are available as flags:
 
@@ -99,15 +99,21 @@ claudemulti -a work              fresh session under "work" in the current direc
 claudemulti -c                   resume the newest session for this directory, in any account
 claudemulti -c -a work           ...only looking in "work"
 claudemulti -r                   pick a session to resume from the list
-claudemulti -r 3                 resume session 3 from the list
-claudemulti -r e422              resume by session ID or ID prefix (at least 4 characters)
+claudemulti -r 3                 resume session 3 from the list (-g -r 3 for the -g list)
+claudemulti -r e422              resume by session ID or ID prefix, from any directory
 claudemulti -t e422 -a work      copy the session to "work" and resume it there
-claudemulti -l                   list recent sessions
+claudemulti -l                   list this directory's sessions
+claudemulti -l -g                list sessions from every directory
 claudemulti -l --all             ...including empty ones (see below)
 claudemulti -p                   list running Claude instances
 claudemulti --accounts           list accounts, with session and running counts
 claudemulti -a work -- --model opus    arguments after -- are passed to claude
 ```
+
+The list shows only sessions whose project is **the current directory**,
+the same set Claude's own `/resume` shows. Subdirectories are separate
+projects and are not included. `-g` lists every directory. A session ID
+given to `-r` or `-t` is found wherever it lives.
 
 The list and `-c` skip **empty sessions**: ones where nothing was typed
 and Claude never replied, such as a session opened and closed with `/exit`, or a
