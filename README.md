@@ -8,7 +8,9 @@ Each account is a separate Claude config directory, selected with
 every account together,
 resumes any of them under the account that owns it, and moves a session from one
 account to another. A typical reason to move one is that an account has hit its
-usage limit partway through a conversation.
+usage limit partway through a conversation. Every session it starts has
+[Remote Control](https://code.claude.com/docs/en/remote-control) on, so you can
+pick it up from the Claude app.
 
 ```
 Claude sessions in ~/brain
@@ -106,6 +108,21 @@ At the first prompt, `n` starts a new session in the current directory and `g`
 switches between this directory and every directory. `claudemulti -g` starts
 with every directory.
 
+What Enter does at each prompt:
+
+| Prompt | Enter |
+|---|---|
+| Select session | the most recent session |
+| Select action | Resume |
+| Select account | the account, when only one is on offer |
+| Archive the source copy? | **yes** |
+| Claude is already running, continue anyway? | **no** |
+| Replace the newer destination copy? | **no** |
+
+The last two default to no because saying yes by accident could fork a
+conversation or roll it back. A transfer from the menu with two accounts is
+therefore Enter, `2`, Enter, Enter.
+
 The same actions are available as flags:
 
 ```
@@ -146,21 +163,45 @@ You can give an account as any prefix that matches only one account, so
 | `CLAUDE_PROFILES_BASE` | `~/.claude-accounts` | where accounts live |
 | `CLAUDEMULTI_LIMIT` | `30` | sessions shown in the list |
 | `CLAUDEMULTI_INCLUDE_DEFAULT` | `0` | set to `1` to include `~/.claude` as an account named `default` |
-| `CLAUDEMULTI_REMOTE_CONTROL` | `1` | start every session with [Remote Control](https://code.claude.com/docs/en/remote-control) on; `0` leaves it to each account's settings |
+| `CLAUDEMULTI_REMOTE_CONTROL` | `1` | `0` leaves Remote Control to each account's settings (see below) |
 
-A session you have named, with `/rename` or in the desktop app, is started with
-`--remote-control "<name>"`. Other sessions get
-`--settings '{"remoteControlAtStartup":true}'`. Both apply to that launch only,
-and no account's `settings.json` is changed.
+To change a default permanently rather than per run, edit the matching variable
+near the top of the script, e.g. `REMOTE_CONTROL`.
 
-The name matters after a transfer. The session the desktop app shows belongs to
-one claude.ai login, so resuming under a different login always creates a new
-remote session. The name you set is saved in the transcript and travels with
-it, and passing it to `--remote-control` gives the new remote session that same
-name instead of a generated one. It needs a claude.ai login; on Team and
-Enterprise plans an admin must also allow it. To change the default
-permanently, edit `REMOTE_CONTROL` near the top of the script. To turn it on
-for plain `claude` as well, set `"remoteControlAtStartup": true` in the
+## Remote Control
+
+Every session ClaudeMulti starts or resumes has
+[Remote Control](https://code.claude.com/docs/en/remote-control) on, so it shows
+up in the Claude desktop and mobile apps. It needs a claude.ai login, and on
+Team and Enterprise plans an admin must allow it.
+
+How it is turned on depends on whether the session has a name:
+
+| Session | Launched with |
+|---|---|
+| named, with `/rename` or in the desktop app | `--remote-control "<name>"` |
+| unnamed, or a new session | `--settings '{"remoteControlAtStartup":true}'` |
+
+Both apply to that launch only. No account's `settings.json` is changed.
+
+**Why the name is passed explicitly.** A name you set in the app is stored in
+two places:
+
+- **In the transcript**, as a `custom-title` entry. This travels with a
+  transfer, and it is what the session list shows.
+- **On claude.ai**, as the remote session the app displays. That remote session
+  belongs to one claude.ai login. Resuming under a different login, which is
+  what a transfer does, always creates a new remote session, which would get a
+  generated name.
+
+Passing the name from the transcript to `--remote-control` gives the new remote
+session your name. Only names you set are passed: Claude's auto-generated
+titles are not, so Claude doesn't save one as if you had chosen it. Unnamed
+sessions get a new generated name each time they start, with or without a
+transfer.
+
+To turn it off for one run, use `CLAUDEMULTI_REMOTE_CONTROL=0 claudemulti`. To
+turn it on for plain `claude` too, set `"remoteControlAtStartup": true` in the
 account's `settings.json`, or use *Enable Remote Control for all sessions* in
 `/config`.
 
@@ -240,6 +281,9 @@ then ask you to choose one with `-a`.
   `-c` won't find sessions there. `-r` still will.
 - The session file layout is Claude Code's internal format and can change
   between versions.
+- Resuming a named session relies on `claude` accepting `--remote-control
+  "<name>"` together with `-r <id>`, which the docs don't state outright. If it
+  is rejected, set `CLAUDEMULTI_REMOTE_CONTROL=0` for that run.
 - Linux only.
 
 ## License
