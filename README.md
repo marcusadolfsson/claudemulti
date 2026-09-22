@@ -195,3 +195,7 @@ then ask you to choose one with `-a`.
 - The session file layout is Claude Code's internal format and can change
   between versions.
 - Linux only.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
