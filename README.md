@@ -146,6 +146,16 @@ You can give an account as any prefix that matches only one account, so
 | `CLAUDE_PROFILES_BASE` | `~/.claude-accounts` | where accounts live |
 | `CLAUDEMULTI_LIMIT` | `30` | sessions shown in the list |
 | `CLAUDEMULTI_INCLUDE_DEFAULT` | `0` | set to `1` to include `~/.claude` as an account named `default` |
+| `CLAUDEMULTI_REMOTE_CONTROL` | `1` | start every session with [Remote Control](https://code.claude.com/docs/en/remote-control) on; `0` leaves it to each account's settings |
+
+Remote Control is turned on by passing `--settings '{"remoteControlAtStartup":true}'`
+to that launch. No account's `settings.json` is changed, and it works for new
+and resumed sessions alike. It needs a claude.ai login; on Team and
+Enterprise plans an admin must also allow it. To change the default
+permanently, edit `REMOTE_CONTROL` near the top of the script. To turn it on
+for plain `claude` as well, set `"remoteControlAtStartup": true` in the
+account's `settings.json`, or use *Enable Remote Control for all sessions* in
+`/config`.
 
 ## Running-session detection
 

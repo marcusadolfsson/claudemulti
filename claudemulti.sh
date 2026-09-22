@@ -28,6 +28,7 @@ set -Eeuo pipefail
 #
 #   CLAUDE_PROFILES_BASE="$HOME/.claude-accounts"
 #   CLAUDEMULTI_LIMIT=30
+#   CLAUDEMULTI_REMOTE_CONTROL=1
 #
 # Optional:
 #
@@ -40,6 +41,14 @@ set -Eeuo pipefail
 PROFILES_BASE="${CLAUDE_PROFILES_BASE:-$HOME/.claude-accounts}"
 SESSION_LIMIT="${CLAUDEMULTI_LIMIT:-30}"
 INCLUDE_DEFAULT="${CLAUDEMULTI_INCLUDE_DEFAULT:-0}"
+
+# Remote Control: 1 = start every session with Remote Control on,
+# 0 = leave it to each account's own settings.
+#
+# Passed as the remoteControlAtStartup setting through --settings,
+# for this launch only, so resumed sessions get it too and no
+# account's settings.json is modified. Needs a claude.ai login.
+REMOTE_CONTROL="${CLAUDEMULTI_REMOTE_CONTROL:-1}"
 
 # Show sessions with nothing in them (set by --all).
 SHOW_EMPTY=0
@@ -1252,11 +1261,17 @@ launch_claude() {
     local cwd="$2"
     shift 2
 
+    local -a extra=()
+
+    if [[ "$REMOTE_CONTROL" == "1" ]]; then
+        extra+=(--settings '{"remoteControlAtStartup":true}')
+    fi
+
     cd "$cwd"
 
     exec env \
         CLAUDE_CONFIG_DIR="$profile_dir" \
-        claude "$@" "${CLAUDE_ARGS[@]}"
+        claude "${extra[@]}" "$@" "${CLAUDE_ARGS[@]}"
 }
 
 # ============================================================
@@ -2046,7 +2061,8 @@ Arguments after -- are passed to claude, e.g.
   $(basename "$0") -a work -- --model opus
 
 Environment: CLAUDE_PROFILES_BASE (default ~/.claude-accounts),
-CLAUDEMULTI_LIMIT (default 30), CLAUDEMULTI_INCLUDE_DEFAULT=1.
+CLAUDEMULTI_LIMIT (default 30), CLAUDEMULTI_INCLUDE_DEFAULT=1,
+CLAUDEMULTI_REMOTE_CONTROL (default 1; 0 leaves it to the account).
 EOF
 }
 
