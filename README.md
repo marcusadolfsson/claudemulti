@@ -216,9 +216,10 @@ does not upload the earlier conversation to the new login. It records
 transcript and creates the new remote session with `noHistoryBackfill`. Later
 connections carry the same restriction (`"cause":"migration"`). This is a
 deliberate guard in Claude Code against moving a conversation from one account
-into another, and ClaudeMulti does not work around it. The full history is
-still in the transcript and in the terminal session; only the app starts from
-the point of the transfer. This happens even when switching back to the
+into another, and ClaudeMulti does not work around it. Nothing is lost: in
+the terminal the resumed session shows the whole conversation, and Claude
+still has all of it as context. Only the app's view starts from the point of
+the transfer. This happens even when switching back to the
 session's original login.
 
 To turn it off for one run, use `CLAUDEMULTI_REMOTE_CONTROL=0 claudemulti`. To
@@ -303,7 +304,8 @@ then ask you to choose one with `-a`.
 - The session file layout is Claude Code's internal format and can change
   between versions.
 - After a transfer, the Claude app shows the session's messages from the
-  transfer on, not its earlier history (see [Remote Control](#remote-control)).
+  transfer on, not its earlier history. The terminal shows all of it (see
+  [Remote Control](#remote-control)).
 - Linux only.
 
 ## License
