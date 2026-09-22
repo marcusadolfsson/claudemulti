@@ -53,6 +53,40 @@ mkdir -p ~/.claude-accounts/work
 CLAUDE_CONFIG_DIR=~/.claude-accounts/work claude     # then /login
 ```
 
+### Migrating the default install
+
+A normal Claude Code install keeps its data in `~/.claude/` and its settings in
+`~/.claude.json`, which sits *outside* that directory. An account under
+`CLAUDE_CONFIG_DIR` keeps both inside one directory, so converting the default
+install into an account means moving the two together:
+
+```bash
+claudemulti -p                         # make sure no Claude is running first
+
+mkdir -p ~/.claude-accounts
+mv ~/.claude       ~/.claude-accounts/personal
+mv ~/.claude.json  ~/.claude-accounts/personal/.claude.json
+```
+
+`personal` can be any name. Your login (`.credentials.json`), sessions,
+memory, settings and MCP servers move with it, so `claudemulti -a personal`
+picks up where plain `claude` left off, with nothing to log in to again.
+
+Afterwards, plain `claude` starts as a brand-new, logged-out install. Launch
+through `claudemulti`, or make the account the default in your shell profile:
+
+```bash
+export CLAUDE_CONFIG_DIR=~/.claude-accounts/personal
+```
+
+Don't symlink `~/.claude.json` to the moved file. Claude saves that file by
+writing a new copy and renaming it into place, which replaces the symlink with
+a regular file, and after that the two copies drift apart without warning.
+
+You can also leave the default install where it is and set
+`CLAUDEMULTI_INCLUDE_DEFAULT=1`, which lists `~/.claude` as an account named
+`default`.
+
 ## Usage
 
 Run `claudemulti` with no arguments to get the interactive menu: the recent
