@@ -942,7 +942,7 @@ discover_running() {
         RUN_WHERE+=("$(ps -o tty= -p "$pid" 2>/dev/null | xargs || true)")
         RUN_CONFIGS+=("$(process_config_dir "$pid")")
 
-    done < <(pgrep -u "$USER" -x claude 2>/dev/null || true)
+    done < <(pgrep -u "$(id -u)" -x claude 2>/dev/null || true)
 
     local k
 
