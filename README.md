@@ -62,12 +62,17 @@ A normal Claude Code install keeps its data in `~/.claude/` and its settings in
 install into an account means moving the two together:
 
 ```bash
-claudemulti -p                         # make sure no Claude is running first
+claudemulti -p                         # lists every running Claude; exit them all first
 
 mkdir -p ~/.claude-accounts
 mv ~/.claude       ~/.claude-accounts/personal
 mv ~/.claude.json  ~/.claude-accounts/personal/.claude.json
 ```
+
+`claudemulti -p` works before any account exists, and shows these sessions
+under the account name `default`. Every Claude it lists has to be exited
+first. A running Claude still has `~/.claude` open, and would carry on writing
+to the old path or recreate it after the move.
 
 `personal` can be any name. Your login (`.credentials.json`), sessions,
 memory, settings and MCP servers move with it, so `claudemulti -a personal`

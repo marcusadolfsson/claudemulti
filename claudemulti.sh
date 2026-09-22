@@ -411,7 +411,14 @@ PY
 declare -a PROFILE_DIRS=()
 declare -a PROFILE_NAMES=()
 
+# discover_profiles [optional]
+#
+# Exits when there are no accounts, unless "optional" is given:
+# listing running Claudes (-p) needs none, and is the first step
+# of migrating a default install, before any account exists.
 discover_profiles() {
+    local optional="${1:-}"
+
     PROFILE_DIRS=()
     PROFILE_NAMES=()
 
@@ -436,6 +443,10 @@ discover_profiles() {
                 2>/dev/null \
                 | sort -z
         )
+    fi
+
+    if [[ ${#PROFILE_DIRS[@]} -eq 0 && "$optional" == "optional" ]]; then
+        return 0
     fi
 
     [[ ${#PROFILE_DIRS[@]} -gt 0 ]] || {
@@ -2580,7 +2591,11 @@ command -v python3 >/dev/null 2>&1 \
 command -v realpath >/dev/null 2>&1 \
     || die "realpath is required"
 
-discover_profiles
+if [[ "$MODE" == "ps" ]]; then
+    discover_profiles optional
+else
+    discover_profiles
+fi
 
 ACCOUNT_INDEX=""
 
