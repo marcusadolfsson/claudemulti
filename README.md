@@ -103,10 +103,18 @@ claudemulti -r 3                 resume session 3 from the list
 claudemulti -r e422              resume by session ID or ID prefix (at least 4 characters)
 claudemulti -t e422 -a work      copy the session to "work" and resume it there
 claudemulti -l                   list recent sessions
+claudemulti -l --all             ...including empty ones (see below)
 claudemulti -p                   list running Claude instances
 claudemulti --accounts           list accounts, with session and running counts
 claudemulti -a work -- --model opus    arguments after -- are passed to claude
 ```
+
+The list and `-c` skip **empty sessions**: ones where nothing was typed
+and Claude never replied, such as a session opened and closed with `/exit`, or a
+Remote Control connection that never got a message. Claude's own `/resume`
+list hides these too. Pass `--all` to show them. A session that has replies but
+no typed prompt, such as one started by another session, is still listed, as
+*(no typed prompt)*.
 
 You can give an account as any prefix that matches only one account, so
 `-a wo` works for `work`.

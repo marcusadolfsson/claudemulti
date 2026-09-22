@@ -41,6 +41,9 @@ PROFILES_BASE="${CLAUDE_PROFILES_BASE:-$HOME/.claude-accounts}"
 SESSION_LIMIT="${CLAUDEMULTI_LIMIT:-30}"
 INCLUDE_DEFAULT="${CLAUDEMULTI_INCLUDE_DEFAULT:-0}"
 
+# Show sessions with nothing in them (set by --all).
+SHOW_EMPTY=0
+
 CURRENT_DIR="$(realpath -m "$PWD")"
 
 # Extra arguments passed through to claude (everything after --).
@@ -148,14 +151,22 @@ encode_project_dir() {
 # ============================================================
 # Extract session information
 #
-# Takes any number of transcript paths and prints one line per
-# path, in order:
+# session_info WANT FILE...
 #
-#   cwd <SEP> title <SEP> last prompt
+# Prints one line per transcript, in the order given:
+#
+#   file <SEP> cwd <SEP> title <SEP> last prompt <SEP> empty
 #
 # title  = the /rename title if set, else Claude's generated title
 # prompt = the last thing actually typed, skipping /commands and
 #          the wrapper messages Claude logs as "user" entries
+# empty  = 1 when nothing was typed and Claude never replied: a
+#          session opened and closed with /exit, or a Remote
+#          Control connection that never got a message
+#
+# WANT = 0 prints every file. WANT = N skips empty sessions and
+# stops after N lines, so callers can pass a generous candidate
+# list without paying for all of it.
 #
 # ============================================================
 
@@ -320,9 +331,45 @@ def info(path):
     return cwd, custom_title or ai_title, last_prompt or last_user_text
 
 
-for path in sys.argv[1:]:
-    fields = [value.replace(SEP, " ").replace("\n", " ") for value in info(path)]
-    print(SEP.join(fields))
+# Byte search, no JSON parsing. A real session has its first
+# reply near the top, so this rarely reads far.
+def has_reply(path):
+    marker = b'"type":"assistant"'
+    tail = b""
+
+    try:
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+
+                if not chunk:
+                    return False
+
+                if marker in tail + chunk:
+                    return True
+
+                tail = chunk[-len(marker):]
+    except Exception:
+        return True
+
+
+want = int(sys.argv[1])
+printed = 0
+
+for path in sys.argv[2:]:
+    cwd, title, prompt = info(path)
+    empty = not prompt and not has_reply(path)
+
+    if want and empty:
+        continue
+
+    fields = [path, cwd, title, prompt, "1" if empty else "0"]
+    print(SEP.join(value.replace(SEP, " ").replace("\n", " ") for value in fields))
+
+    printed += 1
+
+    if want and printed >= want:
+        break
 PY
 }
 
@@ -414,6 +461,7 @@ declare -a SESSION_TIMES=()
 declare -a SESSION_CWDS=()
 declare -a SESSION_TITLES=()
 declare -a SESSION_PREVIEWS=()
+declare -a SESSION_EMPTY=()
 
 # ------------------------------------------------------------
 # Print "mtime <TAB> profile index <TAB> file" for every session
@@ -444,14 +492,19 @@ session_candidates() {
 }
 
 # ------------------------------------------------------------
-# Append sessions read from stdin ("mtime <TAB> index <TAB> file")
-# to the SESSION_* arrays, with one python call for the batch.
+# load_sessions WANT
+#
+# Append sessions read from stdin ("mtime <TAB> index <TAB> file",
+# newest first) to the SESSION_* arrays, with one python call for
+# the batch. WANT is passed to session_info: 0 loads every file,
+# N loads the first N that are not empty.
 # ------------------------------------------------------------
 
 load_sessions() {
+    local want="$1"
     local -a files=()
-    local -a indexes=()
-    local -a times=()
+    local -A index_of=()
+    local -A time_of=()
 
     local mtime profile_index file
 
@@ -459,29 +512,26 @@ load_sessions() {
         [[ -f "$file" ]] || continue
 
         files+=("$file")
-        indexes+=("$profile_index")
-        times+=("${mtime%.*}")
+        index_of["$file"]="$profile_index"
+        time_of["$file"]="${mtime%.*}"
     done
 
     [[ ${#files[@]} -gt 0 ]] || return 0
 
-    local -a info=()
-    mapfile -t info < <(session_info "${files[@]}")
+    local cwd title preview empty
 
-    local k cwd title preview
+    while IFS="$SEP" read -r file cwd title preview empty; do
+        [[ -n "$file" && -n "${index_of[$file]:-}" ]] || continue
 
-    for k in "${!files[@]}"; do
-        cwd="" title="" preview=""
-        IFS="$SEP" read -r cwd title preview <<< "${info[$k]:-}" || true
-
-        SESSION_FILES+=("${files[$k]}")
-        SESSION_IDS+=("$(basename "${files[$k]}" .jsonl)")
-        SESSION_PROFILE_INDEXES+=("${indexes[$k]}")
-        SESSION_TIMES+=("${times[$k]}")
+        SESSION_FILES+=("$file")
+        SESSION_IDS+=("$(basename "$file" .jsonl)")
+        SESSION_PROFILE_INDEXES+=("${index_of[$file]}")
+        SESSION_TIMES+=("${time_of[$file]}")
         SESSION_CWDS+=("$cwd")
         SESSION_TITLES+=("$title")
         SESSION_PREVIEWS+=("$preview")
-    done
+        SESSION_EMPTY+=("$empty")
+    done < <(session_info "$want" "${files[@]}")
 }
 
 discover_sessions() {
@@ -492,12 +542,22 @@ discover_sessions() {
     SESSION_CWDS=()
     SESSION_TITLES=()
     SESSION_PREVIEWS=()
+    SESSION_EMPTY=()
 
-    load_sessions < <(
-        session_candidates \
-            | sort -t $'\t' -k1,1nr \
-            | head -n "$SESSION_LIMIT"
-    )
+    # Empty sessions are hidden unless --all, and do not use up
+    # a slot in the list.
+    if [[ "$SHOW_EMPTY" == "1" ]]; then
+        load_sessions 0 < <(
+            session_candidates \
+                | sort -t $'\t' -k1,1nr \
+                | head -n "$SESSION_LIMIT"
+        )
+    else
+        load_sessions "$SESSION_LIMIT" < <(
+            session_candidates \
+                | sort -t $'\t' -k1,1nr
+        )
+    fi
 }
 
 RESOLVED_SESSION_INDEX=""
@@ -533,7 +593,7 @@ resolve_session() {
 
     local first=${#SESSION_FILES[@]}
 
-    load_sessions < <(
+    load_sessions 0 < <(
         session_candidates \
             | awk -F'\t' -v p="$selector" -v only="$only" -v exclude="$exclude" '
                 {
@@ -1030,9 +1090,15 @@ show_sessions() {
             summary="$preview"
         fi
 
-        if [[ -n "$summary" ]]; then
-            printf "      %s\n" "$(truncate_text "$summary" $((width - 7)))"
+        if [[ -z "$summary" ]]; then
+            if [[ "${SESSION_EMPTY[$i]:-0}" == "1" ]]; then
+                summary="(empty)"
+            else
+                summary="(no typed prompt)"
+            fi
         fi
+
+        printf "      %s\n" "$(truncate_text "$summary" $((width - 7)))"
 
         echo
     done
@@ -1227,15 +1293,14 @@ do_continue() {
 
     local first=${#SESSION_FILES[@]}
 
-    load_sessions < <(
+    load_sessions 1 < <(
         session_candidates \
             | awk -F'\t' -v dir="/projects/$encoded/" -v only="$only" '
                 index($3, dir) == 0          { next }
                 only != "" && $2 != only     { next }
                 { print }
               ' \
-            | sort -t $'\t' -k1,1nr \
-            | head -n 1
+            | sort -t $'\t' -k1,1nr
     )
 
     if (( ${#SESSION_FILES[@]} == first )); then
@@ -1841,6 +1906,8 @@ With no options, shows the interactive menu.
   -t, --transfer SESSION Copy SESSION to the account given with -a
                          (asked for if omitted) and resume it there.
   -l, --list             List recent sessions and exit.
+      --all              Include empty sessions (opened and closed without
+                         a prompt) in the list and the menu.
   -p, --ps               List running Claude instances and exit.
       --accounts         List accounts and exit.
   -h, --help             Show this help.
@@ -1918,6 +1985,10 @@ while (( $# )); do
             ;;
         --accounts)
             set_mode accounts
+            shift
+            ;;
+        --all)
+            SHOW_EMPTY=1
             shift
             ;;
         -h|--help)
