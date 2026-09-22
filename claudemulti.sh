@@ -45,8 +45,10 @@ INCLUDE_DEFAULT="${CLAUDEMULTI_INCLUDE_DEFAULT:-0}"
 # Remote Control: 1 = start every session with Remote Control on,
 # 0 = leave it to each account's own settings.
 #
-# Passed as the remoteControlAtStartup setting through --settings,
-# for this launch only, so resumed sessions get it too and no
+# A session you named (with /rename or in the desktop app) is
+# started with --remote-control "<name>", so the app shows your
+# name; anything else gets the remoteControlAtStartup setting
+# through --settings. Both apply to this launch only, and no
 # account's settings.json is modified. Needs a claude.ai login.
 REMOTE_CONTROL="${CLAUDEMULTI_REMOTE_CONTROL:-1}"
 
@@ -177,7 +179,7 @@ encode_project_dir() {
 #
 # Prints one line per transcript, in the order given:
 #
-#   file <SEP> cwd <SEP> title <SEP> last prompt <SEP> empty
+#   file <SEP> cwd <SEP> title <SEP> last prompt <SEP> empty <SEP> name
 #
 # title  = the /rename title if set, else Claude's generated title
 # prompt = the last thing actually typed, skipping /commands and
@@ -185,6 +187,8 @@ encode_project_dir() {
 # empty  = 1 when nothing was typed and Claude never replied: a
 #          session opened and closed with /exit, or a Remote
 #          Control connection that never got a message
+# name   = the /rename title only (also what a rename in the
+#          desktop app writes), blank if never named
 #
 # WANT = 0 prints every file. WANT = N skips empty sessions and
 # stops after N lines, so callers can pass a generous candidate
@@ -350,7 +354,7 @@ def info(path):
     except Exception:
         pass
 
-    return cwd, custom_title or ai_title, last_prompt or last_user_text
+    return cwd, custom_title or ai_title, last_prompt or last_user_text, custom_title
 
 
 # Byte search, no JSON parsing. A real session has its first
@@ -379,13 +383,13 @@ want = int(sys.argv[1])
 printed = 0
 
 for path in sys.argv[2:]:
-    cwd, title, prompt = info(path)
+    cwd, title, prompt, name = info(path)
     empty = not prompt and not has_reply(path)
 
     if want and empty:
         continue
 
-    fields = [path, cwd, title, prompt, "1" if empty else "0"]
+    fields = [path, cwd, title, prompt, "1" if empty else "0", name]
     print(SEP.join(value.replace(SEP, " ").replace("\n", " ") for value in fields))
 
     printed += 1
@@ -484,6 +488,7 @@ declare -a SESSION_CWDS=()
 declare -a SESSION_TITLES=()
 declare -a SESSION_PREVIEWS=()
 declare -a SESSION_EMPTY=()
+declare -a SESSION_NAMES=()
 
 # ------------------------------------------------------------
 # Print "mtime <TAB> profile index <TAB> file" for every session
@@ -562,7 +567,9 @@ load_sessions() {
 
     local cwd title preview empty
 
-    while IFS="$SEP" read -r file cwd title preview empty; do
+    local name
+
+    while IFS="$SEP" read -r file cwd title preview empty name; do
         [[ -n "$file" && -n "${index_of[$file]:-}" ]] || continue
 
         SESSION_FILES+=("$file")
@@ -573,6 +580,7 @@ load_sessions() {
         SESSION_TITLES+=("$title")
         SESSION_PREVIEWS+=("$preview")
         SESSION_EMPTY+=("$empty")
+        SESSION_NAMES+=("$name")
     done < <(session_info "$want" "${files[@]}")
 }
 
@@ -585,6 +593,7 @@ discover_sessions() {
     SESSION_TITLES=()
     SESSION_PREVIEWS=()
     SESSION_EMPTY=()
+    SESSION_NAMES=()
 
     # Empty sessions are hidden unless --all, and do not use up
     # a slot in the list.
@@ -1256,15 +1265,28 @@ choose_session() {
 # Launch
 # ============================================================
 
+# launch_claude PROFILE_DIR CWD NAME [claude args...]
+#
+# NAME is the session's own name, or blank. With Remote Control on,
+# a named session passes it as --remote-control NAME. A remote
+# session belongs to one claude.ai login, so resuming under another
+# account always creates a new one, and without this it would show
+# up in the app under a generated name instead of yours.
 launch_claude() {
     local profile_dir="$1"
     local cwd="$2"
-    shift 2
+    local name="$3"
+    shift 3
 
     local -a extra=()
 
     if [[ "$REMOTE_CONTROL" == "1" ]]; then
-        extra+=(--settings '{"remoteControlAtStartup":true}')
+        # A leading '-' would be read as an option, not as the name.
+        if [[ -n "$name" && "$name" != -* ]]; then
+            extra+=(--remote-control "$name")
+        else
+            extra+=(--settings '{"remoteControlAtStartup":true}')
+        fi
     fi
 
     cd "$cwd"
@@ -1296,7 +1318,7 @@ do_start() {
     echo "  Directory: $(pretty_path "$CURRENT_DIR")"
     echo
 
-    launch_claude "$profile_dir" "$CURRENT_DIR"
+    launch_claude "$profile_dir" "$CURRENT_DIR" ""
 }
 
 start_fresh() {
@@ -1350,7 +1372,7 @@ do_resume() {
     echo "  Directory: $(pretty_path "$cwd")"
     echo
 
-    launch_claude "$profile_dir" "$cwd" -r "$sid"
+    launch_claude "$profile_dir" "$cwd" "${SESSION_NAMES[$i]:-}" -r "$sid"
 }
 
 
@@ -1848,7 +1870,7 @@ do_transfer() {
     echo "Starting Claude under '$dst_profile'..."
     echo
 
-    launch_claude "$dst_profile_dir" "$effective_cwd" -r "$sid"
+    launch_claude "$dst_profile_dir" "$effective_cwd" "${SESSION_NAMES[$i]:-}" -r "$sid"
 }
 
 

@@ -148,9 +148,16 @@ You can give an account as any prefix that matches only one account, so
 | `CLAUDEMULTI_INCLUDE_DEFAULT` | `0` | set to `1` to include `~/.claude` as an account named `default` |
 | `CLAUDEMULTI_REMOTE_CONTROL` | `1` | start every session with [Remote Control](https://code.claude.com/docs/en/remote-control) on; `0` leaves it to each account's settings |
 
-Remote Control is turned on by passing `--settings '{"remoteControlAtStartup":true}'`
-to that launch. No account's `settings.json` is changed, and it works for new
-and resumed sessions alike. It needs a claude.ai login; on Team and
+A session you have named, with `/rename` or in the desktop app, is started with
+`--remote-control "<name>"`. Other sessions get
+`--settings '{"remoteControlAtStartup":true}'`. Both apply to that launch only,
+and no account's `settings.json` is changed.
+
+The name matters after a transfer. The session the desktop app shows belongs to
+one claude.ai login, so resuming under a different login always creates a new
+remote session. The name you set is saved in the transcript and travels with
+it, and passing it to `--remote-control` gives the new remote session that same
+name instead of a generated one. It needs a claude.ai login; on Team and
 Enterprise plans an admin must also allow it. To change the default
 permanently, edit `REMOTE_CONTROL` near the top of the script. To turn it on
 for plain `claude` as well, set `"remoteControlAtStartup": true` in the
