@@ -88,9 +88,22 @@ You can also leave the default install where it is and set
 
 ## Usage
 
-Run `claudemulti` with no arguments to get the interactive menu: the sessions
-for the current directory, then *Start fresh*, *Resume*, *Transfer* or *Quit*.
-Run `claudemulti -g` for the same menu with sessions from every directory.
+Run `claudemulti` with no arguments to get the interactive menu. It lists the
+sessions for the current directory. Pick one by number, then pick an action:
+
+```
+Select session [1-3], n = new session, g = all directories, q = quit: 2
+
+  1) Resume
+  2) Transfer to another account and resume there
+  3) Back
+
+Select action [1-3, Enter = resume]:
+```
+
+At the first prompt, `n` starts a new session in the current directory and `g`
+switches between this directory and every directory. `claudemulti -g` starts
+with every directory.
 
 The same actions are available as flags:
 

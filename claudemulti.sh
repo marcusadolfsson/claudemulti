@@ -1317,10 +1317,6 @@ do_resume() {
     launch_claude "$profile_dir" "$cwd" -r "$sid"
 }
 
-resume_session() {
-    choose_session || return 1
-    do_resume "$CHOSEN_SESSION_INDEX"
-}
 
 # Most recent session for the current directory, in any account
 # (or only in ONLY_PROFILE_INDEX when given).
@@ -1819,15 +1815,6 @@ do_transfer() {
     launch_claude "$dst_profile_dir" "$effective_cwd" -r "$sid"
 }
 
-transfer_session() {
-    choose_session || return 1
-
-    local src_profile_dir="${PROFILE_DIRS[${SESSION_PROFILE_INDEXES[$CHOSEN_SESSION_INDEX]}]}"
-    local session_index="$CHOSEN_SESSION_INDEX"
-
-    choose_profile "$src_profile_dir" || return 1
-    do_transfer "$session_index" "$CHOSEN_PROFILE_INDEX"
-}
 
 # ============================================================
 # Accounts overview
@@ -1876,44 +1863,123 @@ show_accounts() {
 # Interactive menu
 # ============================================================
 
-interactive_menu() {
-    discover_sessions
+# ------------------------------------------------------------
+# Second step of the menu: what to do with the chosen session.
+# Resume is first and is what Enter does.
+#
+# Returns 1 for "back" or a cancelled action; a successful
+# action execs claude and never returns.
+# ------------------------------------------------------------
 
+session_actions() {
+    local i="$1"
+
+    local profile_index="${SESSION_PROFILE_INDEXES[$i]}"
+
+    echo
+    echo "Session ${SESSION_IDS[$i]}"
+    echo
+    echo "  Account:   ${PROFILE_NAMES[$profile_index]}"
+
+    if [[ -n "${SESSION_TITLES[$i]}" ]]; then
+        echo "  Title:     ${SESSION_TITLES[$i]}"
+    fi
+
+    echo "  Directory: $(pretty_path "${SESSION_CWDS[$i]}")"
+    echo
+    echo "  1) Resume"
+    echo "  2) Transfer to another account and resume there"
+    echo "  3) Back"
+    echo
+
+    local action
+
+    while true; do
+        read -rp "Select action [1-3, Enter = resume]: " action
+
+        case "$action" in
+            ""|1|r|R)
+                do_resume "$i"
+                return
+                ;;
+            2|t|T)
+                choose_profile "${PROFILE_DIRS[$profile_index]}" || return 1
+                do_transfer "$i" "$CHOSEN_PROFILE_INDEX"
+                return
+                ;;
+            3|b|B)
+                return 1
+                ;;
+            *)
+                echo "Invalid selection."
+                ;;
+        esac
+    done
+}
+
+interactive_menu() {
     clear 2>/dev/null || true
 
     echo
     echo "ClaudeMulti"
     echo "════════════════════════════════════════════════════════════════"
-    echo
-    echo "Current directory:"
-    echo "  $(pretty_path "$CURRENT_DIR")"
 
-    show_sessions
-
-    local action
+    local choice
 
     while true; do
-        echo "Actions:"
-        echo
-        echo "  1) Start fresh"
-        echo "  2) Resume session"
-        echo "  3) Transfer session to another account"
-        echo "  4) Quit"
-        echo
+        discover_sessions
 
-        read -rp "Select action [1-4]: " action
+        if [[ "$ALL_DIRS" == "1" ]]; then
+            echo
+            echo "Current directory:"
+            echo "  $(pretty_path "$CURRENT_DIR")"
+        fi
 
-        # A successful action execs claude and never returns;
-        # returning means it was cancelled, so show the menu again.
-        case "$action" in
-            1|n|N) start_fresh      || true ;;
-            2|r|R) resume_session   || true ;;
-            3|t|T) transfer_session || true ;;
-            4|q|Q) exit 0 ;;
-            *)     echo "Invalid selection." ;;
-        esac
+        show_sessions
 
-        echo
+        local count=${#SESSION_FILES[@]}
+        local scope_hint="g = all directories"
+
+        if [[ "$ALL_DIRS" == "1" ]]; then
+            scope_hint="g = this directory only"
+        fi
+
+        local prompt="n = new session, $scope_hint, q = quit: "
+
+        if (( count > 0 )); then
+            prompt="Select session [1-$count], $prompt"
+        fi
+
+        while true; do
+            read -rp "$prompt" choice
+
+            case "$choice" in
+                n|N)
+                    start_fresh || true
+                    echo
+                    continue
+                    ;;
+                g|G)
+                    if [[ "$ALL_DIRS" == "1" ]]; then
+                        ALL_DIRS=0
+                    else
+                        ALL_DIRS=1
+                    fi
+                    break
+                    ;;
+                q|Q)
+                    exit 0
+                    ;;
+            esac
+
+            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )); then
+                # Back or cancelled: list the sessions again.
+                session_actions $((choice - 1)) || true
+                break
+            fi
+
+            echo "Invalid selection."
+        done
     done
 }
 
